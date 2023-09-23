@@ -1,0 +1,809 @@
+---
+title: "MarmAtlasFigures"
+---
+
+# define color palettes
+```{r color palettes}
+require(RColorBrewer)
+require(PNWColors)
+tbl_tree.pca = readRDS("hcpca.marm.neurons.pca.metadata.RDS")
+
+# anatomical brain structure colors
+col.pal.tissue = brewer.pal(length(table(tbl_tree.pca$region)), name = "Paired")
+names(col.pal.tissue) = names(table(tbl_tree.pca$region))
+
+# add extra colors/tissues to the marmo color palettes for mouse tissues
+tmp = c("#9254E2", "#D087DD")
+names(tmp) = c("ent", "gp" )
+
+col.pal.tissue = c(col.pal.tissue, tmp)
+
+# developmental vesicle colors
+col.pal.vesicle = PNWColors::pnw_palette(length(table(tbl_tree.pca$vesicle)), name = "Sunset")
+names(col.pal.vesicle) = names(table(tbl_tree.pca$vesicle))
+
+# neurotransmitter colors
+tmp = c("#037549", "#0896C1","aliceblue","cornsilk4")
+names(tmp) = c("both","th","gad","glut")
+col.pal.nt = tmp 
+```
+
+# Reproduce the dendrograms for marmoset neurons
+### HCA-PCA marmoset
+
+```{r, echo=FALSE}
+
+require(stats)
+require(factoextra)
+require(FactoMineR)
+require(ape)
+require(tidyr)
+require(dplyr)
+require(ggtree)
+require(treeio)
+require(ggtreeExtra)
+
+
+# marmoset neuron metacells with all expressed genes, normalized counts to 10^5
+submeta.table.norm.all =readRDS( "all.neurons.submetacells.norm.RDS")
+
+# marmoset neuron metacells subset of genes expressed at least 10 transcripts per 10^5 transcripts in at least one cell type, log10 normalized
+submeta.table.norm.expr = readRDS("all.neurons.submetacells.lognorm.expressed.RDS") # 
+
+# for PCA, take lognorm values of expressed genes
+pca.tree = prcomp(submeta.table.norm.expr, scale. = TRUE, rank. = 100)
+summary(pca.tree)
+
+
+
+#calculate total variance explained by each principal component
+var_explained = pca.tree$sdev^2 / sum(pca.tree$sdev^2)
+
+#create scree plot
+qplot(c(1:dim(pca.tree$rotation)[1]), var_explained) + 
+  geom_line() + 
+  xlab("Principal Component") + 
+  ylab("Variance Explained") +
+  ggtitle("Scree Plot") +
+  ylim(0, 1) +
+  xlim(1,10)
+
+
+pc2 = sort(pca.tree$rotation[,"PC2"], decreasing = T)
+
+# examine PC2 genes
+pc2.genes = sort(pca.tree$x[,"PC2"], decreasing = T)
+
+plotPCAweights = function(pca.weights, pn, label_num=10, g2plot = 500, cex = 0.5, doLab = T) {
+# order the weights
+    tmp = pca.weights[order(-pca.weights[,pn]),,drop=FALSE]
+par(pty="s")
+    plot(tmp[1:g2plot,pn],pch=19,cex=cex,ylab="",xlab="")
+    if (doLab == T) {
+  text(tmp[1:label_num,pn],labels = rownames(tmp)[1:label_num],offset = 0.2,pos=4, cex=0.7)
+    }
+    return(pn.list = rownames(tmp)[1:label_num])
+}
+
+pn =2
+pn.list = plotPCAweights(pca.tree$x, pn, label_num = 20, cex=0.25)
+
+
+#svl = t(pca.tree$rotation[,paste0("PC", 1:20)])
+require(factoextra)
+require(FactoMineR)
+
+# Use HCPC package
+res.pca = PCA(t(submeta.table.norm.expr), ncp = 100)
+res.hcpc <- HCPC(res.pca, graph = FALSE)
+
+fviz_dend(res.hcpc, 
+          cex = 0.7,                     # Label size
+          palette = "jco",               # Color palette see ?ggpubr::ggpar
+          rect = TRUE, rect_fill = TRUE, # Add rectangle around groups
+          rect_border = "jco",           # Rectangle color
+          labels_track_height = 0.8      # Augment the room for labels
+          )
+
+plot(res.hcpc, choice = 'map')
+plot(res.hcpc, choice = 'tree')
+
+hcpcTree<-res.hcpc$call$t$tree
+hc.pca<-as.phylo(hcpcTree)
+tbl_tree.pca = as_tibble(as.phylo(hc.pca))
+
+#### plot HCA-PCA marmoset fan dendrogram ####
+marm.metadata = readRDS("marm.neuron.metadata.RDS")
+
+tbl_tree.pca = left_join(tbl_tree.pca, marm.metadata, by="label")
+
+
+# get the basic tree in circular layout
+p1 = ggtree(as.treedata(tbl_tree.pca), branch.length='none', layout='circular') 
+
+# add metadata layers
+p2 = p1+ 
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=region),
+        width = 2,
+        offset=0.08
+     ) +
+     scale_fill_manual(
+         name="Region",
+         values=col.pal.tissue,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+
+p3 = p2+ 
+  new_scale_fill() +
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=vesicle),
+        width = 2,
+        offset=0.1
+     ) +
+     scale_fill_manual(
+         name="Vesicle",
+         values=col.pal.vesicle,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+
+p4 = p3+ 
+  new_scale_fill() +
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=nt),
+        width = 2,
+        offset=0.1
+     ) +
+     scale_fill_manual(
+         name="Region",
+         values=col.pal.nt,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+
+p4
+
+pdf("phylo.marm.PCA.celllabels.pdf")
+p.lab = p1 + geom_tiplab(size = 2.5, offset=.1, align = FALSE) 
+print(p.lab)
+dev.off()
+
+
+#### marm with node labels ####
+p0 = ggtree(as.treedata(tbl_tree.pca), branch.length='none', layout='circular') +
+  geom_text(aes(label=node))
+
+pdf("marm.phylo.PCA.node_labels.pdf")
+print(p0)
+dev.off()
+
+# color nodes
+d <- data.frame(node=c(301, 299, 298, 296, 294, 300), type=c("tele_GABA_int", "tele_GLUT", "tele_dien_GABA_SPN-like","hind_both", "mixed_dien", "mixed_dien2"))
+
+col.pal.hca = c("thistle","azure2","steelblue","orange", "orange","orange","darkgreen","darkgreen")
+names(col.pal.hca) = c("tele_GABA_int", "tele_GLUT", "tele_dien_GABA_SPN-like", "mixed_dien", "mixed_dien2","mixed_dien3","hind_both","hind_both2")
+
+
+p5 = p4 + new_scale_fill() + geom_hilight(data=d, aes(node=node, fill=type),
+                            type = "roundrect", alpha = 0.5)+
+  scale_fill_manual(name="Clade", values=col.pal.hca ,
+                    guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=4
+               ))
+
+p5
+pdf("marm.phylo.PCA.highlight_clades.pdf")
+print(p5)
+dev.off()
+
+p6 = p5+
+ theme(legend.position = 'none')
+pdf("marm.phylo.PCA.highlight_clades_nolabel.pdf", height = 12, width = 12)
+print(p6)
+dev.off()
+
+#### plot marmoset flat ####
+require(ggtree)
+require(ggtreeExtra)
+require(tidytree)
+require(ggnewscale)
+
+p1 = ggtree(as.treedata(tbl_tree.pca), branch.length='none') 
+
+p2 = p1+ 
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=region),
+        width = 3,
+        offset=0.08
+     ) +
+     scale_fill_manual(
+         name="Region",
+         values=col.pal.tissue,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+
+p3 = p2+ 
+  new_scale_fill() +
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=vesicle),
+        width = 3,
+        offset=0.2
+     ) +
+     scale_fill_manual(
+         name="Vesicle",
+         values=col.pal.vesicle,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+
+p4 = p3+ 
+  new_scale_fill() +
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=nt),
+        width = 3,
+        offset=0.2
+     ) +
+     scale_fill_manual(
+         name="Region",
+         values=col.pal.nt,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+
+p4
+
+pdf("phylo.marm.PCA.celllabels.flat.pdf")
+
+p.lab = p4 + geom_tiplab(size = 2.5, offset=.1, align = FALSE) 
+print(p.lab)
+dev.off()
+
+pdf("phylo.marm.PCA.flat.pdf")
+p5 = p4 + theme(legend.position = "none")
+print(p5)
+dev.off()
+
+pdf("phylo.marm.PCA.flat.label.pdf")
+
+print(p4)
+dev.off()
+
+#### heatmap genes on PCA neurons #####
+genes = intersect(c("GAD1",  "GAD2","SLC17A6","SLC17A7","SLC17A8","PVALB","SST","VIP","LAMP5","CUX2","RORB","FEZF2","SLC32A1","SV2B","SV2C","SLC6A1","BDNF","OTX2","TAC3","CRACDL","ZEB2","VAV3","FOXP2","OTOF","LHX6","FOXG1","SIM1","OTP","MEIS2","NRN1","TAFA1","LHX9","LHX8","CHAT","DRD1","DRD2","LHX1","ADCYAP1","SOX14","ZFHX4"), rownames(submeta.table.norm.all))
+
+# normalize so that heatmap is scaled to the max expression per gene
+svl.heat = t(submeta.table.norm.all[genes,])
+svl.norm = apply(svl.heat, 2, function(u) u/max(u))
+
+# reorder genes
+require(gplots)
+hc.hmp = heatmap.2(svl.norm, Rowv = FALSE)
+#heatmap.2(svl.norm[,hc.hmp$colInd], Rowv = FALSE)
+svl.norm = svl.norm[,hc.hmp$colInd]
+
+p6 = p4+ new_scale_fill() 
+p7 = gheatmap(p6, svl.norm, offset=8, width=6, low = "#fbf7f5", high = "red", legend_title = "expression", color="gray", colnames_angle=90, colnames_offset_y = 0, font.size =0, hjust = 0)
+
+pdf("phylo.marm.PCA.flat.gene.heatmap.pdf")
+
+p8 = p7 + theme(legend.position = "none")
+print(p8)
+dev.off()
+
+pdf("phylo.marm.PCA.flat.gene.heatmap.label.pdf")
+
+p9 = gheatmap(p6, svl.norm, offset=8, width=6, low = "#fbf7f5", high = "red", legend_title = "expression", color="gray", colnames_angle=90, colnames_offset_y = 0, font.size =3, hjust = 0)
+
+print(p9)
+dev.off()
+
+
+#### marm with node labels ####
+p0 = ggtree(as.treedata(tbl_tree.pca), branch.length='none') +
+  geom_text(aes(label=node))
+
+pdf("marm.phylo.PCA.node_labels.flat.pdf")
+print(p0)
+dev.off()
+
+# color nodes
+d <- data.frame(node=c(301, 299, 298, 296, 294, 300), type=c("tele_GABA_int", "tele_GLUT", "tele_dien_GABA_SPN-like","hind_both", "mixed_dien", "mixed_dien2"))
+
+col.pal.hca = c("thistle","azure2","steelblue","orange", "orange","orange","darkgreen","darkgreen")
+names(col.pal.hca) = c("tele_GABA_int", "tele_GLUT", "tele_dien_GABA_SPN-like", "mixed_dien", "mixed_dien2","mixed_dien3","hind_both","hind_both2")
+
+
+p5 = p4 + new_scale_fill() + geom_hilight(data=d, aes(node=node, fill=type),
+                            type = "roundrect", alpha = 0.5)+
+  scale_fill_manual(name="Clade", values=col.pal.hca ,
+                    guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=4
+               ))
+
+p5
+pdf("marm.phylo.PCA.highlight_clades.flat.pdf")
+print(p5)
+dev.off()
+
+p6 = p5+
+ theme(legend.position = 'none')
+pdf("marm.phylo.PCA.highlight_clades_nolabel.flat.pdf", height = 12, width = 4)
+print(p6)
+dev.off()
+
+
+#### PC scores on PCA-based matrix ####
+require(phytools)
+svl = t(pca.tree$rotation[,paste0("PC", 1:20)])
+dim(svl)
+
+for (pc in paste0("PC",1:20)) {
+svl.pc = svl[pc,]  
+fit<-fastAnc(as.phylo(hc.pca),svl.pc,vars=TRUE,CI=TRUE)
+tmp = as.treedata(tbl_tree.pca)
+
+td <- data.frame(node = nodeid(tbl_tree.pca, names(svl.pc)),
+               trait = svl.pc)
+nd <- data.frame(node = names(fit$ace), trait = fit$ace)
+
+d <- rbind(td, nd)
+d$node <- as.numeric(d$node)
+tree <- full_join(tbl_tree.pca, d, by = 'node')
+
+### circular ###
+p1 = ggtree(as.treedata(tree),  layout='fan', branch.length='none', open.angle = 6) + 
+    geom_tree(aes(color=trait), continuous = 'colour', size=1) +  
+    scale_color_gradientn(colours=c("#fbf7f5","red"))
+
+p2 = p1+ 
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=region),
+        width = 2,
+        offset=0.08
+     ) +
+     scale_fill_manual(
+         name="Region",
+         values=col.pal.tissue,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+
+p3 = p2+ 
+  new_scale_fill() +
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=nt),
+        width = 2,
+        offset=0.1
+     ) +
+     scale_fill_manual(
+         name="Vesicle",
+         values=col.pal.nt,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+p3 = p3+ theme(legend.position = "none")
+pdf(paste0("marm.neurons.",pc, ".pcahca.pdf"))
+print(p3)
+dev.off()
+
+
+}
+
+```
+
+## HCA-CORR marmoset
+```{r}
+
+#### ANC gene plot HCCOR method ###
+NormTo = function(x, sum_to=1) sum_to * x/sum(x)
+
+NormalizeMetaCells = function(meta, norm_to=1e05) norm_to * apply( meta, 2, function(x) x/sum(x) )
+
+
+LogNormalizeMetaCells = function(meta, norm_to=1e05) {
+  # Normalize, then log-transform metacell data
+  meta1 = log10( NormalizeMetaCells( meta, norm_to ) )
+
+  # Very-low values may not be meaningful, so change them to zero
+  meta1[ is.na(meta1) ] = 0
+  meta1[ meta1 == -Inf ] = 0
+  meta1[ meta1 < 0 ] = 0
+  return(meta1)
+}
+
+LogmetacellExpressedGenes = function( metacell ) {
+  # Log-normalized metacell, reduced to genes with significant expression in at least one cluster
+  #m0 = metacell[ SelectGenesForIntraDatasetAnalysis(rownames(metacell)), ]
+  m1 = LogNormalizeMetaCells( metacell ) #( m0 )
+  wh_genes_expressed = which(apply(m1,1,max) > 1 )
+  m2 = m1[ wh_genes_expressed, ]
+  return(m2)
+}
+
+
+MetacellDendrogramCorrelation = function( metacell, do_plot=T, doLogNorm=T, doExpFilt=T ) {
+  ## correlation as distance
+  ## Use correlations between variables "as distance"
+  if (doLogNorm==TRUE & doExpFilt == T) {
+  m = LogmetacellExpressedGenes( metacell )
+  } else if (doLogNorm==TRUE & doExpFilt == T) {
+  m = LogNormalizeMetaCells( metacell )  
+  } else {
+    # don't log normalize but still check that genes are expressed
+    m = metacell
+     wh_genes_expressed = which(apply(m,1,max) > 1 )
+     m = m[ wh_genes_expressed, ]
+  }
+  dists = as.dist((1 - cor(m))/2)
+  dists <- round(1000 * dists) # (prints more nicely)
+  hc = hclust(dists)
+  if(do_plot) plot( hc, axes=F, ylab="", xlab="", main="", sub="" )
+  return(hc)
+}
+
+
+require(stats)
+require(factoextra)
+require(FactoMineR)
+require(ape)
+require(tidyr)
+require(dplyr)
+require(ggtree)
+require(treeio)
+require(ggtreeExtra)
+require(ggtree)
+require(ggnewscale)
+
+submeta.table = readRDS( "all.neurons.submetacells.RDS")
+tbl_tree.pca = readRDS("hcpca.marm.neurons.pca.metadata.RDS")
+
+
+# use correlation values as distance matrix, metacells are already normalized
+hccor = MetacellDendrogramCorrelation(submeta.table)
+
+tbl_tree = as_tibble(as.phylo(hccor))
+
+# add metadata
+require(tidyr)
+require(dplyr)
+
+marm.metadata = readRDS("marm.neuron.metadata.RDS")
+
+tbl_tree = left_join(tbl_tree, marm.metadata, by="label")
+
+p1 = ggtree(as.treedata(tbl_tree), branch.length='none', layout='circular') #+ xlim(-10, NA) #+ geom_tippoint(size=2, color = color.order) 
+
+tmp = tibble(label = get_taxa_name(p1), label.order = 1:length(get_taxa_name(p1)))
+tbl_tree = left_join(tbl_tree, tmp, by="label")
+
+# child(tbl_tree, 290)
+# ancestor(tbl_tree, 290)
+
+#### plot marmoset ####
+p1 = ggtree(as.treedata(tbl_tree), branch.length='none', layout='circular') #+ xlim(-10, NA) #+ geom_tippoint(size=2, color = color.order) 
+
+# uncomment to get neuron type numbers on outside
+#p1 = p1 + geom_tiplab(aes(label = label.order), size = 2.5, offset=7, align = FALSE) 
+
+p2 = p1+ 
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=region),
+        width = 2,
+        offset=0.08
+     ) +
+     scale_fill_manual(
+         name="Neurotransmitter",
+         values=col.pal.tissue,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+
+p3 = p2+ 
+  new_scale_fill() +
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=vesicle),
+        width = 2,
+        offset=0.1
+     ) +
+     scale_fill_manual(
+         name="Vesicle",
+         values=col.pal.vesicle,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+
+p4 = p3+ 
+  new_scale_fill() +
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=nt),
+        width = 2,
+        offset=0.1
+     ) +
+     scale_fill_manual(
+         name="Region",
+         values=col.pal.nt,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+
+p4
+
+#p5 = p4 + hexpand(.5)
+
+pdf("marm.phylo.metadata.pdf", height = 12, width = 12)
+print(p4)
+dev.off()
+
+p5 = p4+
+ theme(legend.position = 'none')
+
+p5
+
+```
+## HCA-PCA mouse
+```{r}
+
+require(readxl)
+require(tidyr)
+require(phytools)
+require(dplyr)
+require(ggnewscale)
+require(ggtree)
+require(ggtreeExtra)
+require(treeio)
+require(ggplot2)
+
+mouse.metas.overlap.norm = readRDS( "submeta.table.norm.mouse_native.marm.overlap.RDS")
+
+mouse.metadata = read_xlsx("annotation.BrainCellAtlas_Saunders_version_2018.04.01.xlsx")
+
+hccor.mouse.native.marm.overlap = readRDS("hccor.mouse.native.marm.overlap.RDS")
+
+#### plot mouse ####
+tbl_tree.mouse = as_tibble(as.phylo(hccor.mouse.native.marm.overlap))
+
+# add metadata
+mouse.metadata.tbl = tibble("vesicle" = mouse.metadata$vesicle, "label" = mouse.metadata$tissue_subcluster, "nt" = mouse.metadata$nt, "region" = mouse.metadata$region)
+
+
+tbl_tree.mouse = left_join(tbl_tree.mouse, mouse.metadata.tbl, by="label")
+
+p0 = ggtree(as.treedata(tbl_tree.mouse), branch.length='none', layout='circular')
+
+tmp = tibble(label = get_taxa_name(p0), label.order = 1:length(get_taxa_name(p0)))
+tbl_tree.mouse = left_join(tbl_tree.mouse, tmp, by="label")
+
+p1 = ggtree(as.treedata(tbl_tree.mouse), branch.length='none', layout='circular')
+
+# swap order of SPN and glut tele nodes so that they are the same as marmoset for visualization
+#ancestor(tbl_tree.mouse, 342)
+
+p1.mouse_reorder = flip(p1, 346, 347) 
+
+#### mouse with node labels ####
+p1.node = ggtree(as.treedata(tbl_tree.mouse), branch.length='none', layout='circular') +
+  geom_text(aes(label=node))
+p1.node = flip(p1.node, 346, 347)
+
+
+p1 = p1.mouse_reorder 
+
+
+p2 = p1+ 
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=region),
+        width = 2,
+        offset=0.08
+     ) +
+     scale_fill_manual(
+         name="Region",
+         values=col.pal.tissue,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+
+p3 = p2+ 
+  new_scale_fill() +
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=vesicle),
+        width = 2,
+        offset=0.1
+     ) +
+     scale_fill_manual(
+         name="Vesicle",
+         values=col.pal.vesicle,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+
+p4 = p3+ 
+  new_scale_fill() +
+     geom_fruit(
+         geom=geom_tile,
+         mapping=aes(fill=nt),
+        width = 2,
+        offset=0.1
+     ) +
+     scale_fill_manual(
+         name="Neurotransmitter",
+         values=col.pal.nt,
+         guide=guide_legend(
+                   keywidth=0.3,
+                   keyheight=0.3,
+                   order=3
+               ),
+         na.translate=FALSE
+     )
+
+
+
+
+p5 = p4+
+ theme(legend.position = 'none')
+
+
+#### mouse highlight clades ####
+# color nodes
+d <- data.frame(node=c(334, 335, 346,332,333,328), type=c("tele_GABA_int", "tele_GLUT", "tele_dien_GABA_SPN-like","hind","mixed","mixed2"))
+
+col.pal.clade = c("thistle","azure2","steelblue","darkgreen", "orange", "orange")
+names(col.pal.clade) = c("tele_GABA_int", "tele_GLUT", "tele_dien_GABA_SPN-like","hind","mixed","mixed2")
+
+p5 = p4 + new_scale_fill() + geom_hilight(data=d, aes(node=node, fill=type),
+                            type = "roundrect", alpha = 0.5)+
+  scale_fill_manual(name="Clade", values=col.pal.clade) 
+p5
+
+p6 = p5+
+ theme(legend.position = 'none')
+
+p6
+
+```
+
+
+# Calculate tree distances
+```{r}
+require(TreeDist)
+require(ggthemes)
+
+# calculate tree distance between PCA HCA and correlation HCA
+pca.tdist = TreeDistance( as.phylo(hccor), as.phylo(hc.pca))
+
+
+#### shuffle PCA
+print(res.pca)
+dim(res.pca$var$contrib)
+
+nperm = 10 #100
+orig.mat = t(submeta.table.norm.expr)
+perm.dist = data.frame(tree.dists = matrix(NA, nrow=nperm, ncol = 1))
+perm.2pcadist = data.frame(tree.dists = matrix(NA, nrow=nperm, ncol = 1))
+for (n in 1:nperm) {
+  
+  perm.mat = apply(orig.mat, 2, sample)
+  rownames(perm.mat) = rownames(orig.mat)
+  perm.pca = PCA(perm.mat, ncp = 100,graph = FALSE)
+  perm.hcpc <- HCPC(perm.pca, graph = FALSE)
+  perm.hcpcTree<-perm.hcpc$call$t$tree
+  hc.perm.pca = as.phylo(perm.hcpcTree)
+  perm.tdist = TreeDistance( as.phylo(hccor), as.phylo(hc.perm.pca))
+  perm.dist[n,1] = perm.tdist
+  
+  # distance to unshuffled PCA tree
+  perm.PCAdist = TreeDistance( as.phylo(hc.pca), as.phylo(hc.perm.pca))
+  perm.2pcadist[n,1] = perm.PCAdist
+}
+
+colnames(perm.dist) = "tree.dist"
+colnames(perm.2pcadist) = "tree.dist"
+
+dist.tbl = tibble("tree_distance"= perm.dist$tree.dist, "cat" = "metacell2shuffledPCA")
+dist.tbl = bind_rows(dist.tbl, data.frame("tree_distance" = pca.tdist, "cat" = "PCA"))
+
+l <- density(dist.tbl$tree_distance)
+
+ggplot(dist.tbl, aes(x=tree_distance, fill = cat)) + geom_density(alpha=.3) +
+    geom_vline(aes(xintercept = pca.tdist),colour = "cyan") +
+  xlim(range(l$x)[1]-0.1, 1) +
+  theme_clean()
+
+```
+# 
+
+# Ancestral state reconstruction of marmoset metacells
+```{r}
+# marmoset neuron metacells subset of genes expressed at least 10 transcripts per 10^5 transcripts in at least one cell type, log10 normalized
+submeta.table.norm.expr = readRDS("all.neurons.submetacells.lognorm.expressed.RDS") # 
+
+require(phytools)
+require(factoextra)
+require(FactoMineR)
+
+# reconstruct internal nodes
+# takes a while to run, only redo if you have updated the tree!
+res.pca = PCA(t(submeta.table.norm.expr), ncp = 100)
+res.hcpc <- HCPC(res.pca, graph = FALSE)
+
+hcpcTree<-res.hcpc$call$t$tree
+hc.pca<-as.phylo(hcpcTree)
+
+tmp.phy = as.phylo(hc.pca)
+
+anc.metas.marm.pca = apply(submeta.table.norm.expr, 1, function(x) fastAnc(tmp.phy, x, vars = FALSE, CI=FALSE))
+
+
+```
+
